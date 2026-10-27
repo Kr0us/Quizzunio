@@ -1,5 +1,7 @@
 package cl.quizzunio.ui.screens
 
+import androidx.compose.runtime.collectAsState
+import cl.quizzunio.study.LocalStudyQuizViewModel
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -69,16 +71,24 @@ fun QuizHomeScreen(
     onSettingsClick: () -> Unit = {},
     onQuizClick: (String) -> Unit = {}
 ) {
+    val studyState = LocalStudyQuizViewModel.current?.state?.collectAsState()?.value
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilterIndex by remember { mutableIntStateOf(0) }
     val filters = listOf("Todos", "Recientes", "Completados")
 
-    val sampleQuizzes = listOf(
+    val previewQuizzes = listOf(
         QuizItem("1", "Historia de Francia", 10, "Completado", false),
         QuizItem("2", "Biología celular", 15, "Borrador", true),
         QuizItem("3", "Matemáticas - Unidad 2", 8, "Completado", false),
         QuizItem("4", "Física - Movimiento", 12, "Completado", false)
     )
+
+    val sampleQuizzes = (studyState?.quizzes?.map { quiz ->
+        QuizItem(quiz.id, quiz.title, quiz.questions.size, if (quiz.completed) "Completado" else "Listo", false)
+    } ?: previewQuizzes).filter { quiz ->
+        quiz.title.contains(searchQuery.trim(), ignoreCase = true) &&
+            (selectedFilterIndex != 2 || quiz.status == "Completado")
+    }.let { quizzes -> if (selectedFilterIndex == 1) quizzes.take(10) else quizzes }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,

@@ -1,5 +1,17 @@
 package cl.quizzunio.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import cl.quizzunio.study.LocalStudyQuizViewModel
+import cl.quizzunio.study.StudyDocumentReader
+import java.util.Locale
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,16 +78,28 @@ fun CreateQuizScreen(
     onSaveDraftClick: () -> Unit = {},
     onGenerateAiClick: () -> Unit = {}
 ) {
+    val studyModel = LocalStudyQuizViewModel.current
+    val studyState = studyModel?.state?.collectAsState()?.value
+    val context = LocalContext.current
+    val isBusy = studyState?.isBusy == true
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        studyModel?.importDocuments(uris)
+    }
+    BackHandler(enabled = isBusy) { }
     var quizName by remember { mutableStateOf("") }
     var selectedTopic by remember { mutableStateOf("") }
     var questionCount by remember { mutableIntStateOf(10) }
 
-    val attachedFiles = remember {
+    val previewAttachedFiles = remember {
         mutableStateListOf(
             AttachedFile("Apuntes_Francia.pdf", "2.4 MB", "PDF"),
             AttachedFile("Temario_Unidad1.docx", "1.1 MB", "DOC")
         )
     }
+
+    val attachedFiles = studyState?.documents?.map { document ->
+        AttachedFile(document.name, formatStudyFileSize(document.sizeBytes), document.type)
+    } ?: previewAttachedFiles
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -86,7 +110,7 @@ fun CreateQuizScreen(
                     .padding(horizontal = 16.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBackClick) {
+                IconButton(onClick = onBackClick, enabled = !isBusy) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Volver",
@@ -126,8 +150,9 @@ fun CreateQuizScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
-                value = quizName,
-                onValueChange = { quizName = it },
+                value = studyState?.quizName ?: quizName,
+                onValueChange = { if (studyModel != null) studyModel.updateQuizName(it) else quizName = it },
+                enabled = !isBusy,
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Ej.: Repaso unidad 2") },
                 singleLine = true,
@@ -155,8 +180,9 @@ fun CreateQuizScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             OutlinedTextField(
-                value = selectedTopic,
-                onValueChange = { selectedTopic = it },
+                value = studyState?.topic ?: selectedTopic,
+                onValueChange = { if (studyModel != null) studyModel.updateTopic(it) else selectedTopic = it },
+                enabled = !isBusy,
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = { Text("Seleccionar tema o unidad  ▾") },
                 singleLine = true,
@@ -190,7 +216,8 @@ fun CreateQuizScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = { if (questionCount > 1) questionCount-- },
+                    onClick = { if (studyModel != null) studyModel.changeQuestionCount(-1) else if (questionCount > 1) questionCount-- },
+                    enabled = !isBusy,
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),
@@ -217,7 +244,7 @@ fun CreateQuizScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "$questionCount",
+                            text = "${studyState?.questionCount ?: questionCount}",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onBackground
@@ -226,7 +253,8 @@ fun CreateQuizScreen(
                 }
 
                 Button(
-                    onClick = { questionCount++ },
+                    onClick = { if (studyModel != null) studyModel.changeQuestionCount(1) else if (questionCount < 50) questionCount++ },
+                    enabled = !isBusy,
                     modifier = Modifier
                         .weight(1f)
                         .height(44.dp),
@@ -267,7 +295,13 @@ fun CreateQuizScreen(
                         BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                         shape = RoundedCornerShape(12.dp)
                     )
-                    .clickable { /* Añadir archivo */ },
+                    .clickable(enabled = !isBusy) {
+                        try {
+                            filePicker.launch(StudyDocumentReader.MIME_TYPES)
+                        } catch (error: ActivityNotFoundException) {
+                            Toast.makeText(context, "No hay un explorador de documentos disponible en este dispositivo.", Toast.LENGTH_LONG).show()
+                        }
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -280,12 +314,12 @@ fun CreateQuizScreen(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Toca para agregar archivos",
+                        text = if (isBusy) "Procesando archivos..." else "Toca para agregar archivos",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "PDF · PPTX · DOCX",
+                        text = "PDF · TXT · PPTX · DOCX",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.secondary
                     )
@@ -295,7 +329,7 @@ fun CreateQuizScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Lista de archivos adjuntos
-            attachedFiles.forEach { file ->
+            attachedFiles.forEachIndexed { fileIndex, file ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -313,6 +347,7 @@ fun CreateQuizScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
+                            modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Badge de formato
@@ -334,9 +369,11 @@ fun CreateQuizScreen(
 
                             Spacer(modifier = Modifier.width(12.dp))
 
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = file.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onBackground
@@ -350,7 +387,12 @@ fun CreateQuizScreen(
                         }
 
                         IconButton(
-                            onClick = { attachedFiles.remove(file) },
+                            onClick = {
+                                if (studyModel != null && studyState != null) {
+                                    studyModel.removeDocument(studyState.documents[fileIndex].id)
+                                } else previewAttachedFiles.remove(file)
+                            },
+                            enabled = !isBusy,
                             modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
@@ -372,7 +414,12 @@ fun CreateQuizScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
-                    onClick = onSaveDraftClick,
+                    onClick = {
+                        if (studyModel != null) studyModel.generateQuiz(onSaveDraftClick)
+                        else onSaveDraftClick()
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp),
@@ -383,7 +430,9 @@ fun CreateQuizScreen(
                     )
                 ) {
                     Text(
-                        text = "Guardar borrador",
+                        text = if (isBusy) "Procesando..." else "Generar cuestionario",
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = FontWeight.Bold
                         )
@@ -392,6 +441,7 @@ fun CreateQuizScreen(
 
                 Button(
                     onClick = onGenerateAiClick,
+                    enabled = !isBusy,
                     modifier = Modifier
                         .weight(1.2f)
                         .height(48.dp),
@@ -411,6 +461,12 @@ fun CreateQuizScreen(
             }
         }
     }
+}
+
+private fun formatStudyFileSize(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> String.format(Locale.forLanguageTag("es-CL"), "%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> String.format(Locale.forLanguageTag("es-CL"), "%.1f KB", bytes / 1024.0)
+    else -> "$bytes B"
 }
 
 @Preview(showBackground = true)

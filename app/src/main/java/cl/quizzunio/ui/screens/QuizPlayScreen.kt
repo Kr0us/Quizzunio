@@ -1,5 +1,9 @@
 package cl.quizzunio.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import cl.quizzunio.study.LocalStudyQuizViewModel
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,9 +55,17 @@ fun QuizPlayScreen(
     onBackClick: () -> Unit = {},
     onFinishQuiz: () -> Unit = {}
 ) {
+    val studyModel = LocalStudyQuizViewModel.current
+    val studyState = studyModel?.state?.collectAsState()?.value
+    val isBusy = studyState?.isBusy == true
+    BackHandler(enabled = isBusy) { }
+    if (studyModel != null && studyState?.activeQuiz == null) {
+        LaunchedEffect(isBusy) { if (!isBusy) onBackClick() }
+        return
+    }
 
     // TODO: Implementar obtencion de preguntas en Core
-    val questions = listOf<QuizQuestion>(
+    val previewQuestions = listOf<QuizQuestion>(
         QuizQuestion(
             "Hola, esto es una pregunta",
             listOf(
@@ -87,8 +99,12 @@ fun QuizPlayScreen(
         )
     )
 
-    var selectedOptionIndex by remember { mutableIntStateOf(-1) }
-    var currentQuestionIndex by remember { mutableIntStateOf(1) }
+    val questions = studyState?.activeQuiz?.questions ?: previewQuestions
+    var previewSelectedOptionIndex by remember { mutableIntStateOf(-1) }
+    var previewCurrentQuestionIndex by remember { mutableIntStateOf(1) }
+    val currentQuestionIndex = studyState?.currentQuestionIndex?.plus(1) ?: previewCurrentQuestionIndex
+    val selectedOptionIndex = if (studyState != null) studyState.answers.getOrNull(currentQuestionIndex - 1) ?: -1
+        else previewSelectedOptionIndex
     val totalQuestions = questions.size
     val question = questions.getOrElse(currentQuestionIndex - 1) { questions.first() }
     val correctOptionIndex = question.correctAnswer
@@ -102,7 +118,7 @@ fun QuizPlayScreen(
                     .padding(horizontal = 16.dp, vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onBackClick) {
+                IconButton(onClick = onBackClick, enabled = !isBusy) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Volver",
@@ -232,9 +248,10 @@ fun QuizPlayScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 6.dp)
-                                    .clickable(enabled = selectedOptionIndex == -1) {
+                                    .clickable(enabled = selectedOptionIndex == -1 && !isBusy) {
                                         if (selectedOptionIndex == -1) {
-                                            selectedOptionIndex = index
+                                            if (studyModel != null) studyModel.selectAnswer(index)
+                                            else previewSelectedOptionIndex = index
                                         }
                                     },
                                 shape = RoundedCornerShape(12.dp),
@@ -307,11 +324,13 @@ fun QuizPlayScreen(
                 ) {
                     Button(
                         onClick = {
-                            if (currentQuestionIndex > 1) {
-                                currentQuestionIndex--
-                                selectedOptionIndex = -1
+                            if (studyModel != null) studyModel.previousQuestion()
+                            else if (previewCurrentQuestionIndex > 1) {
+                                previewCurrentQuestionIndex--
+                                previewSelectedOptionIndex = -1
                             }
                         },
+                        enabled = currentQuestionIndex > 1 && !isBusy,
                         modifier = Modifier
                             .weight(1f)
                             .height(48.dp),
@@ -331,13 +350,16 @@ fun QuizPlayScreen(
 
                     Button(
                         onClick = {
-                            if (currentQuestionIndex < totalQuestions) {
-                                currentQuestionIndex++
-                                selectedOptionIndex = -1
+                            if (studyModel != null) {
+                                if (studyModel.nextQuestion()) studyModel.finishQuiz(onFinishQuiz)
+                            } else if (previewCurrentQuestionIndex < totalQuestions) {
+                                previewCurrentQuestionIndex++
+                                previewSelectedOptionIndex = -1
                             } else {
                                 onFinishQuiz()
                             }
                         },
+                        enabled = selectedOptionIndex != -1 && !isBusy,
                         modifier = Modifier
                             .weight(1.2f)
                             .height(48.dp),

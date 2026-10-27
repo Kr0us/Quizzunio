@@ -1,5 +1,16 @@
 package cl.quizzunio.ui.navigation
 
+import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
+import cl.quizzunio.study.LocalStudyQuizViewModel
+import cl.quizzunio.study.rememberStudyQuizViewModel
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -40,6 +51,10 @@ fun AppNavHost(
     navController: NavHostController = rememberNavController(),
     startDestination: String = Screen.Welcome.route
 ) {
+    val studyModel = rememberStudyQuizViewModel()
+    val studyState by studyModel.state.collectAsState()
+    val context = LocalContext.current
+    CompositionLocalProvider(LocalStudyQuizViewModel provides studyModel) {
     NavHost(
         navController = navController,
         startDestination = startDestination,
@@ -97,8 +112,8 @@ fun AppNavHost(
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
                 },
-                onQuizClick = { _ ->
-                    navController.navigate(Screen.QuizPlay.route)
+                onQuizClick = { id ->
+                    if (studyModel.selectQuiz(id)) navController.navigate(Screen.QuizPlay.route)
                 }
             )
         }
@@ -127,10 +142,14 @@ fun AppNavHost(
                     navController.popBackStack()
                 },
                 onSaveDraftClick = {
-                    navController.popBackStack()
+                    if (navController.currentDestination?.route == Screen.CreateQuiz.route) {
+                        navController.navigate(Screen.QuizPlay.route) {
+                            popUpTo(Screen.CreateQuiz.route) { inclusive = true }
+                        }
+                    }
                 },
                 onGenerateAiClick = {
-                    navController.navigate(Screen.AiProcessing.route)
+                    Toast.makeText(context, "La generación con IA estará disponible en una próxima versión.", Toast.LENGTH_LONG).show()
                 }
             )
         }
@@ -162,15 +181,25 @@ fun AppNavHost(
 
         // Pantalla 09: Resultados
         composable(Screen.QuizResult.route) {
+            if (studyState.activeQuiz == null) {
+                LaunchedEffect(studyState.isBusy) {
+                    if (!studyState.isBusy) navController.navigate(Screen.Home.route) {
+                        popUpTo(Screen.Home.route) { inclusive = true }
+                    }
+                }
+                return@composable
+            }
             QuizResultScreen(
-                correctAnswers = 8,
-                totalQuestions = 10,
+                correctAnswers = studyState.correctAnswers,
+                totalQuestions = studyState.activeQuiz?.questions?.size ?: 1,
                 onRetryClick = {
+                    studyModel.resetAttempt()
                     navController.navigate(Screen.QuizPlay.route) {
                         popUpTo(Screen.Home.route)
                     }
                 },
                 onReviewAnswersClick = {
+                    studyModel.reviewAnswers()
                     navController.navigate(Screen.QuizPlay.route) {
                         popUpTo(Screen.Home.route)
                     }
@@ -182,5 +211,16 @@ fun AppNavHost(
                 }
             )
         }
+    }
+    studyState.message?.let { message ->
+        AlertDialog(
+            onDismissRequest = { studyModel.clearMessage() },
+            title = { Text("Cuestionarios") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { studyModel.clearMessage() }) { Text("Entendido") }
+            }
+        )
+    }
     }
 }
